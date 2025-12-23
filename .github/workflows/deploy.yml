@@ -1,0 +1,48 @@
+name: Deploy Next.js to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build app
+        run: npm run build
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to EC2
+        run: |
+          rsync -avz --delete \
+            --exclude=node_modules \
+            --exclude=.git \
+            ./ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.APP_DIR }}
+
+      - name: Start app on EC2
+        run: |
+          ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ${{ secrets.APP_DIR }}
+            npm install --production
+            pm2 restart nextjs-app || pm2 start npm --name nextjs-app -- start
+            pm2 save
+          EOF
